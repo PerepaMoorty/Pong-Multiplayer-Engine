@@ -1,9 +1,10 @@
 import socket
 import threading
 import time
-from ssl_config import create_ssl_context
-from game_engine import GameEngine
-from protocol import encode, decode
+
+from server.ssl_config import create_ssl_context
+from server.game_engine import GameEngine
+from server.protocol import encode, decode
 
 HOST = "0.0.0.0"
 PORT = 5555
@@ -11,6 +12,15 @@ PORT = 5555
 clients = []
 engine = GameEngine()
 lock = threading.Lock()
+
+game_started = False
+
+def broadcast(msg):
+    for c in clients:
+        try:
+            c.sendall(msg)
+        except:
+            pass
 
 def handle_client(conn, player_id):
     global clients
@@ -21,14 +31,17 @@ def handle_client(conn, player_id):
             data = conn.recv(1024).decode()
             if not data:
                 break
+
             buffer += data
+
             while "\n" in buffer:
                 msg, buffer = buffer.split("\n", 1)
                 msg = decode(msg)
 
-                if msg["type"] == "INPUT":
+                if msg["type"] == "INPUT" and game_started:
                     with lock:
                         engine.move_paddle(player_id, msg["move"])
+
         except:
             break
 
@@ -36,17 +49,35 @@ def handle_client(conn, player_id):
     clients.remove(conn)
 
 def game_loop():
+    global game_started
+
     while True:
         time.sleep(1/60)
-        with lock:
-            engine.update()
-            state = encode({"type": "STATE", **engine.get_state()})
 
-        for c in clients:
-            try:
-                c.sendall(state)
-            except:
-                pass
+        if not game_started:
+            continue
+
+        with lock:
+            result = engine.update()
+
+        if result == "RESET":
+            reset_msg = encode(engine.reset_state())
+            broadcast(reset_msg)
+            continue
+
+        state = encode({"type": "STATE", **engine.get_state()})
+
+        broadcast(state)
+
+def wait_for_start():
+    global game_started
+
+    print("Press ENTER to start the game...")
+    input()
+
+    game_started = True
+    broadcast(encode({"type": "START"}))
+    print("Game started!")
 
 def main():
     global clients
@@ -61,15 +92,21 @@ def main():
 
     player_id = 0
 
+    print("Waiting for 2 players...")
+
     while len(clients) < 2:
-        conn, _ = sock.accept()
+        conn, addr = sock.accept()
         conn = context.wrap_socket(conn, server_side=True)
+
         clients.append(conn)
+        print(f"Player {player_id+1} connected")
 
         threading.Thread(target=handle_client, args=(conn, player_id), daemon=True).start()
         player_id += 1
 
-    print("Game started with 2 players")
+    print("Both players connected!")
+
+    wait_for_start()
 
     while True:
         time.sleep(1)

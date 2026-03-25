@@ -24,14 +24,16 @@ class GameEngine:
                 self.ball_dx *= -1
             else:
                 self.score[1] += 1
-                self.reset()
+                return "RESET"
 
         if self.ball_x >= WIDTH - 20:
             if abs(self.ball_y - self.paddles[1]) < PADDLE_HEIGHT // 2:
                 self.ball_dx *= -1
             else:
                 self.score[0] += 1
-                self.reset()
+                return "RESET"
+
+        return None
 
     def move_paddle(self, player, direction):
         if direction == "UP":
@@ -44,4 +46,11 @@ class GameEngine:
             "ball": {"x": self.ball_x, "y": self.ball_y},
             "paddles": self.paddles,
             "score": self.score
+        }
+    
+    def reset_state(self):
+        self.reset()
+        return {
+            "type": "RESET",
+            **self.get_state()
         }

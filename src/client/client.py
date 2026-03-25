@@ -1,7 +1,7 @@
 import pygame
-from network import Network
-from input_handler import get_input
-from renderer import draw
+from client.network import Network
+from client.input_handler import get_input
+from client.renderer import draw
 from common.constants import *
 
 pygame.init()
@@ -10,6 +10,7 @@ clock = pygame.time.Clock()
 
 net = Network("127.0.0.1", 5555)
 
+game_started = False
 state = None
 
 while True:
@@ -25,8 +26,15 @@ while True:
         net.send({"type": "INPUT", "move": move})
 
     data = net.receive()
-    if data and data["type"] == "STATE":
-        state = data
+    if data:
+        if data["type"] == "START":
+            game_started = True
 
-    if state:
+        elif data["type"] == "RESET":
+            state = data
+
+        elif data["type"] == "STATE" and game_started:
+            state = data
+
+    if game_started and state:
         draw(screen, state)

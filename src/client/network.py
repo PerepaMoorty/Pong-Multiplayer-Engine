@@ -4,7 +4,7 @@ from server.protocol import encode, decode
 
 class Network:
     def __init__(self, host, port):
-        context = ssl.create_default_context()
+        context = ssl._create_unverified_context()
         self.sock = context.wrap_socket(socket.socket(socket.AF_INET), server_hostname=host)
         self.sock.connect((host, port))
         self.buffer = ""
