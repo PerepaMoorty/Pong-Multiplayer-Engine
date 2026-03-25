@@ -1,96 +1,54 @@
 # Real-Time Multiplayer Pong Networking Engine
 
 ## Overview
-This project implements a real-time multiplayer Pong game using low-level socket programming with secure SSL/TLS communication. It demonstrates client-server architecture, real-time synchronization, and concurrent handling of multiple clients.
+This project is a real-time multiplayer Pong game built using low-level TCP socket programming with SSL/TLS security. It follows a client-server architecture where the server controls the game state and clients act as input/render nodes.
 
 ## Features
 - Client-server architecture
 - Two-player real-time gameplay
-- TCP socket communication
+- Server-controlled game start
 - SSL/TLS encrypted communication
 - Thread-based concurrency
-- Modular project structure
+- Automatic certificate generation
+- Synchronized game state and restart handling
 
-## Architecture
+## How It Works
+- The server waits for 2 clients to connect
+- The server starts the game manually (press ENTER)
+- Clients send paddle inputs to the server
+- The server updates and broadcasts the game state
+- Clients render only the received state
+- Reset events are synchronized across all clients
 
-### Server
-- Accepts client connections
-- Maintains and updates game state
-- Synchronizes gameplay across clients
-- Handles secure communication using SSL
+## Requirements
+- Python 3.x
+- pygame
+- cryptography
 
-### Clients
-- Capture user input
-- Send paddle movement to server
-- Receive and render game state
-
-## Technologies Used
-- Python
-- TCP Socket Programming
-- SSL/TLS (secure communication)
-- Pygame (rendering)
-
-## Setup Instructions
-
-### 1. Install Dependencies
+## Installation
+Install dependencies:
 pip install -r requirements.txt
 
-### 2. Generate SSL Certificates
-openssl req -x509 -newkey rsa:4096 -keyout certs/server.key -out certs/server.crt -days 365 -nodes
+## Running the Project
 
-### 3. Run the Server
-cd server  
-python server.py
+### 1. Start Server
+cd src  
+python -m server.server
 
-### 4. Run the Clients (2 Instances)
-cd client  
-python client.py
+### 2. Start Clients (run twice in separate terminals)
+cd src  
+python -m client.client
 
 ## Controls
 - UP Arrow → Move paddle up
 - DOWN Arrow → Move paddle down
 
-## Protocol Design
-All communication is JSON-based over TCP:
+## Notes
+- The server must be started before clients
+- The game begins only after the server starts it
+- SSL certificates are auto-generated if not present
 
-- INPUT → Sent by client (paddle movement)
-- STATE → Sent by server (game state update)
-
-### Example Messages
-
-Client Input:
-{
-  "type": "INPUT",
-  "move": "UP"
-}
-
-Server State:
-{
-  "type": "STATE",
-  "ball": {"x": 100, "y": 200},
-  "paddles": [150, 180],
-  "score": [2, 3]
-}
-
-## Performance Considerations
-- Fixed tick rate (60 FPS)
-- Thread-based concurrency for client handling
-- Buffered message parsing to avoid packet fragmentation issues
-
-## Limitations
-- Supports only 2 players
-- No matchmaking system
-- No lag compensation
-- Basic collision and physics model
-
-## Future Improvements
-- UDP-based fast networking mode
-- Spectator mode
-- Improved physics and collision detection
-- Matchmaking and lobby system
-- Latency compensation techniques
-
-## Repository Structure
+## Project Structure
 multiplayer-pong-engine/
 │
 ├── server/
@@ -100,7 +58,7 @@ multiplayer-pong-engine/
 ├── README.md
 └── requirements.txt
 
-## Demo Notes
-- Start the server before clients
-- Exactly 2 clients must connect
-- Game begins automatically once both clients are connected
+## Limitations
+- Supports only 2 players
+- No matchmaking or lobby system
+- No lag compensation
