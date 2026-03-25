@@ -48,16 +48,6 @@ python -m client.client
 - The game begins only after the server starts it
 - SSL certificates are auto-generated if not present
 
-## Project Structure
-multiplayer-pong-engine/
-│
-├── server/
-├── client/
-├── common/
-├── certs/
-├── README.md
-└── requirements.txt
-
 ## Limitations
 - Supports only 2 players
 - No matchmaking or lobby system
