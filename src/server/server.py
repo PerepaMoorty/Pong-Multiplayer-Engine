@@ -15,16 +15,33 @@ lock = threading.Lock()
 
 game_started = False
 
+
+# just to print the IP so other systems can connect
+def get_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return "127.0.0.1"
+
+
 def broadcast(msg):
+    # send message to all connected clients
     for c in clients:
         try:
             c.sendall(msg)
         except:
             pass
 
+
 def handle_client(conn, player_id):
     global clients
     buffer = ""
+
+    print(f"Player {player_id + 1} connected")
 
     while True:
         try:
@@ -45,8 +62,12 @@ def handle_client(conn, player_id):
         except:
             break
 
+    print(f"Player {player_id + 1} disconnected")
     conn.close()
-    clients.remove(conn)
+
+    if conn in clients:
+        clients.remove(conn)
+
 
 def game_loop():
     global game_started
@@ -61,23 +82,27 @@ def game_loop():
             result = engine.update()
 
         if result == "RESET":
-            reset_msg = encode(engine.reset_state())
-            broadcast(reset_msg)
+            msg = encode(engine.reset_state())
+            broadcast(msg)
             continue
 
-        state = encode({"type": "STATE", **engine.get_state()})
+        state = encode({
+            "type": "STATE",
+            **engine.get_state()
+        })
 
         broadcast(state)
+
 
 def wait_for_start():
     global game_started
 
-    print("Press ENTER to start the game...")
-    input()
+    input("Press ENTER to start the game...")
 
     game_started = True
     broadcast(encode({"type": "START"}))
-    print("Game started!")
+    print("Game started")
+
 
 def main():
     global clients
@@ -88,28 +113,34 @@ def main():
     sock.bind((HOST, PORT))
     sock.listen(2)
 
+    print(f"Server running on {get_ip()}:{PORT}")
+    print("Waiting for players...\n")
+
     threading.Thread(target=game_loop, daemon=True).start()
 
     player_id = 0
-
-    print("Waiting for 2 players...")
 
     while len(clients) < 2:
         conn, addr = sock.accept()
         conn = context.wrap_socket(conn, server_side=True)
 
         clients.append(conn)
-        print(f"Player {player_id+1} connected")
 
-        threading.Thread(target=handle_client, args=(conn, player_id), daemon=True).start()
+        threading.Thread(
+            target=handle_client,
+            args=(conn, player_id),
+            daemon=True
+        ).start()
+
         player_id += 1
 
-    print("Both players connected!")
+    print("Both players connected")
 
     wait_for_start()
 
     while True:
         time.sleep(1)
+
 
 if __name__ == "__main__":
     main()
