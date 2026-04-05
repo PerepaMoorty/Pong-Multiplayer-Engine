@@ -35,9 +35,11 @@ pip install -r requirements.txt
 cd src  
 python -m server.server
 
-### 2. Start Clients (run twice in separate terminals)
+### 2. Start Clients
 cd src  
 python -m client.client
+
+##### *Can either be the multiple terminals of the same system, or three different systems *(1 Server, 2 Clients)*.*
 
 ## Controls
 - UP Arrow → Move paddle up
