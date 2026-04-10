@@ -2,21 +2,26 @@ import socket
 import threading
 import time
 
-from server.ssl_config import create_ssl_context
 from server.game_engine import GameEngine
 from server.protocol import encode, decode
 
 HOST = "0.0.0.0"
-PORT = 5555
+PORT = 5555   # fixed common port
 
-clients = []
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind((HOST, PORT))
+
 engine = GameEngine()
 lock = threading.Lock()
+
+clients = {}          # addr -> player_id
+last_seen = {}        # addr -> last packet time
+next_player_id = 0
 
 game_started = False
 
 
-# just to print the IP so other systems can connect
+# Utility: Get Server IP
 def get_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -28,52 +33,93 @@ def get_ip():
         return "127.0.0.1"
 
 
-def broadcast(msg):
-    # send message to all connected clients
-    for c in clients:
+# Handle Incoming Packets
+def handle_packet(data, addr):
+    global next_player_id
+
+    msg = decode(data)
+
+    # track activity
+    last_seen[addr] = time.time()
+
+    if msg["type"] == "JOIN":
+        if addr not in clients:
+            if len(clients) >= 2:
+                print(f"[SERVER] Rejecting {addr} (game full)")
+                return
+
+            clients[addr] = next_player_id
+            print(f"[SERVER] Player {next_player_id + 1} joined from {addr}")
+            next_player_id += 1
+
+        return
+
+    if addr not in clients:
+        return  # ignore unknown clients
+
+    player_id = clients[addr]
+
+    if msg["type"] == "INPUT" and game_started:
+        with lock:
+            engine.move_paddle(player_id, msg["move"])
+
+    msg["ack"] = msg.get("seq", 0)
+
+# Network Listener Thread
+def network_loop():
+    while True:
         try:
-            c.sendall(msg)
+            data, addr = sock.recvfrom(2048)
+            print(f"[DEBUG] Packet received from {addr}")
+            handle_packet(data, addr)
         except:
             pass
 
 
-def handle_client(conn, player_id):
-    global clients
-    buffer = ""
-
-    print(f"Player {player_id + 1} connected")
+# Disconnect Detection
+def cleanup_loop():
+    TIMEOUT = 600  # (in seconds) 10 minutes without activity = disconnect
 
     while True:
-        try:
-            data = conn.recv(1024).decode()
-            if not data:
-                break
+        time.sleep(1)
+        now = time.time()
 
-            buffer += data
+        for addr in list(last_seen.keys()):
+            if now - last_seen[addr] > TIMEOUT:
+                player_id = clients.get(addr, None)
 
-            while "\n" in buffer:
-                msg, buffer = buffer.split("\n", 1)
-                msg = decode(msg)
+                if player_id is not None:
+                    print(f"[SERVER] Player {player_id + 1} disconnected")
 
-                if msg["type"] == "INPUT" and game_started:
-                    with lock:
-                        engine.move_paddle(player_id, msg["move"])
-
-        except:
-            break
-
-    print(f"Player {player_id + 1} disconnected")
-    conn.close()
-
-    if conn in clients:
-        clients.remove(conn)
+                clients.pop(addr, None)
+                last_seen.pop(addr, None)
 
 
+# Broadcast Game State
+def broadcast_state():
+    state = {
+        "type": "STATE",
+        "server_time": time.time(),
+        **engine.get_state()
+    }
+
+    data = encode(state)
+
+    for addr in clients:
+        sock.sendto(data, addr)
+
+
+# Game Loop
 def game_loop():
     global game_started
 
+    TICK_RATE = 60
+    NETWORK_RATE = 20
+
+    tick = 0
+
     while True:
-        time.sleep(1/60)
+        time.sleep(1 / TICK_RATE)
 
         if not game_started:
             continue
@@ -82,59 +128,55 @@ def game_loop():
             result = engine.update()
 
         if result == "RESET":
-            msg = encode(engine.reset_state())
-            broadcast(msg)
+            print("[SERVER] Round reset")
+            broadcast_state()
             continue
 
-        state = encode({
-            "type": "STATE",
-            **engine.get_state()
-        })
+        if tick % (TICK_RATE // NETWORK_RATE) == 0:
+            broadcast_state()
 
-        broadcast(state)
+        tick += 1
 
 
+# Start Game (User Prompt)
 def wait_for_start():
     global game_started
 
-    input("Press ENTER to start the game...")
+    print("\n[SERVER] Press ENTER to start the game...")
+    input()
 
     game_started = True
-    broadcast(encode({"type": "START"}))
-    print("Game started")
+
+    start_msg = encode({"type": "START"})
+    for addr in clients:
+        sock.sendto(start_msg, addr)
+
+    print("[SERVER] Game started")
 
 
+# Main Entry
 def main():
-    global clients
+    print("=" * 40)
+    print("   UDP Multiplayer Pong Server")
+    print("=" * 40)
 
-    context = create_ssl_context()
+    print(f"[SERVER] Running on {get_ip()}:{PORT}")
+    print("[SERVER] Waiting for players (max 2)...")
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind((HOST, PORT))
-    sock.listen(2)
-
-    print(f"Server running on {get_ip()}:{PORT}")
-    print("Waiting for players...\n")
-
+    threading.Thread(target=network_loop, daemon=True).start()
+    threading.Thread(target=cleanup_loop, daemon=True).start()
     threading.Thread(target=game_loop, daemon=True).start()
 
-    player_id = 0
+    # Wait for 2 players
+    while True:
+        print(f"[SERVER] Players connected: {len(clients)}/2", end="\r")
+        
+        if len(clients) >= 2:
+            break
 
-    while len(clients) < 2:
-        conn, addr = sock.accept()
-        conn = context.wrap_socket(conn, server_side=True)
+        time.sleep(0.5)
 
-        clients.append(conn)
-
-        threading.Thread(
-            target=handle_client,
-            args=(conn, player_id),
-            daemon=True
-        ).start()
-
-        player_id += 1
-
-    print("Both players connected")
+    print("[SERVER] Both players connected")
 
     wait_for_start()
 
