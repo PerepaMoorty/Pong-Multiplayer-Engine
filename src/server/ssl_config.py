@@ -1,24 +1,45 @@
-import ssl
-import os
-from pathlib import Path
-import subprocess
+"""
+SSL/TLS helper.
+Generates a self-signed certificate on first run (openssl, then Python
+cryptography library as fallback) and returns a server-side SSLContext.
 
-def generate_self_signed_cert(cert_path, key_path):
+Used by the TCP control channel (JOIN / START handshake).  Game-state
+packets travel over UDP and are protected by a shared session token
+exchanged during the TLS handshake.
+"""
+
+import ssl
+import subprocess
+from pathlib import Path
+
+
+CERT_DIR  = Path(__file__).resolve().parent.parent.parent / "certs"
+CERT_FILE = CERT_DIR / "server.crt"
+KEY_FILE  = CERT_DIR / "server.key"
+
+
+def _gen_openssl() -> bool:
     try:
-        subprocess.run([
-            "openssl", "req", "-x509",
-            "-newkey", "rsa:4096",
-            "-keyout", str(key_path),
-            "-out", str(cert_path),
-            "-days", "365",
-            "-nodes",
-            "-subj", "/CN=localhost"
-        ], check=True)
+        subprocess.run(
+            [
+                "openssl", "req", "-x509",
+                "-newkey", "rsa:2048",
+                "-keyout", str(KEY_FILE),
+                "-out",    str(CERT_FILE),
+                "-days",   "365",
+                "-nodes",
+                "-subj",   "/CN=pong-server",
+            ],
+            check=True,
+            capture_output=True,
+        )
         return True
-    except:
+    except Exception:
         return False
 
-def generate_with_python(cert_path, key_path):
+
+def _gen_python() -> bool:
+    """Pure-Python fallback using the cryptography package."""
     try:
         from cryptography import x509
         from cryptography.x509.oid import NameOID
@@ -27,57 +48,49 @@ def generate_with_python(cert_path, key_path):
         from datetime import datetime, timedelta
 
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-
-        subject = issuer = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, u"localhost"),
-        ])
-
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "pong-server")])
         cert = (
             x509.CertificateBuilder()
-            .subject_name(subject)
-            .issuer_name(issuer)
+            .subject_name(name)
+            .issuer_name(name)
             .public_key(key.public_key())
             .serial_number(x509.random_serial_number())
             .not_valid_before(datetime.utcnow())
             .not_valid_after(datetime.utcnow() + timedelta(days=365))
             .sign(key, hashes.SHA256())
         )
-
-        with open(cert_path, "wb") as f:
-            f.write(cert.public_bytes(serialization.Encoding.PEM))
-
-        with open(key_path, "wb") as f:
-            f.write(key.private_bytes(
+        CERT_FILE.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+        KEY_FILE.write_bytes(
+            key.private_bytes(
                 serialization.Encoding.PEM,
                 serialization.PrivateFormat.TraditionalOpenSSL,
-                serialization.NoEncryption()
-            ))
-
+                serialization.NoEncryption(),
+            )
+        )
         return True
-    except:
+    except Exception:
         return False
 
-def create_ssl_context():
-    base_dir = Path(__file__).resolve().parent.parent
-    cert_dir = base_dir / "certs"
-    cert_dir.mkdir(exist_ok=True)
 
-    cert_path = cert_dir / "server.crt"
-    key_path = cert_dir / "server.key"
+def create_server_context() -> ssl.SSLContext:
+    """Return a TLS server context, generating certs if needed."""
+    CERT_DIR.mkdir(exist_ok=True)
 
-    if not cert_path.exists() or not key_path.exists():
-        print("[INFO] SSL certificates not found. Generating...")
+    if not CERT_FILE.exists() or not KEY_FILE.exists():
+        print("[SSL] Generating self-signed certificate …")
+        ok = _gen_openssl() or _gen_python()
+        if not ok:
+            raise RuntimeError("[SSL] Could not generate certificates.")
+        print("[SSL] Certificate ready.")
 
-        if not generate_self_signed_cert(cert_path, key_path):
-            print("[INFO] OpenSSL not found. Using Python fallback...")
-            success = generate_with_python(cert_path, key_path)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(certfile=str(CERT_FILE), keyfile=str(KEY_FILE))
+    return ctx
 
-            if not success:
-                raise RuntimeError("Failed to generate SSL certificates")
 
-        print("[INFO] Certificates generated successfully.")
-
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
-
-    return context
+def create_client_context() -> ssl.SSLContext:
+    """Return a TLS client context that accepts self-signed certs."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode    = ssl.CERT_NONE   # acceptable for self-signed / LAN play
+    return ctx
